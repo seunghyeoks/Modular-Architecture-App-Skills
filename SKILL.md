@@ -1,6 +1,6 @@
 ---
 name: modular-architecture
-description: Layer structure and dependency rules for this repository. Consult when adding a module, changing dependencies, adding an app target (AppWatch, extensions), or diagnosing a layer violation. Covers the SPM-modules + XcodeGen-app-shell setup, the five module targets, resource placement, and host test branching.
+description: Layer definitions, the dependency matrix, and how a module is composed. Consult when adding a module, changing dependencies between modules, deciding which layer something belongs in, or diagnosing a layer violation. Describes the architecture itself, not the build system that implements it.
 ---
 
 # Modular Architecture
@@ -8,9 +8,9 @@ description: Layer structure and dependency rules for this repository. Consult w
 ## At a glance
 
 ```
-App (AppMobile, AppWatch, AppNotificationHandler …)     ← .xcodeproj (XcodeGen)
+App (AppMobile, AppWatch, AppNotificationHandler …)
  │
- ├─→ Feature ──→ Domain ──→ Infra                       ← everything below is a local Swift Package
+ ├─→ Feature ──→ Domain ──→ Infra
  │      ↘
  │      FeatureExtra   (localization, assets, design system)
  │
@@ -18,10 +18,6 @@ App (AppMobile, AppWatch, AppNotificationHandler …)     ← .xcodeproj (XcodeG
 
 every layer ──→ Shared   (type extensions and utilities, Foundation only)
 ```
-
-**One module is one local Swift Package.** Only runnable app targets — the app itself and per-module Example apps — live in the XcodeGen-generated `.xcodeproj`. That split exists because SwiftPM cannot produce an iOS app target.
-
-The point of this structure is to **eliminate project regeneration from everyday work**. Adding files, editing modules, and changing dependencies all stay inside SwiftPM, so Xcode never has to reindex.
 
 ## Layers
 
@@ -50,29 +46,43 @@ Allowed directions (row → column). The single source of truth for this table i
 Further rules:
 
 1. **Modules in the same layer must not depend on each other.** Navigation between features is wired by the app, which injects closures into view factories.
-2. **A module depends only on the Interface products of the layers below it.** The single exception is `AppDIContainer` — a composition root has to see concrete types in order to assemble them.
-3. **Interface targets may depend only on external SPM packages and Shared Interface products.** That narrow allowance exists so shared error and ID types don't have to be redefined per module. (The App layer is exempt: `AppDIContainerInterface` needs Feature Interfaces to expose view factory contracts.)
+2. **A module depends only on the Interface of the layers below it.** The single exception is `AppDIContainer` — a composition root has to see concrete types in order to assemble them.
+3. **Interface targets may depend only on external packages and Shared Interfaces.** That narrow allowance exists so shared error and ID types don't have to be redefined per module. (The App layer is exempt: `AppDIContainerInterface` needs Feature Interfaces to expose view factory contracts.)
 4. **Testing products are for test targets and Example apps only.**
 5. **Domain, Infra, and Shared must not import SwiftUI or UIKit.**
 
-## Module layout
+### Why features never depend on each other
 
+A feature exposes a view factory contract rather than a concrete view:
+
+```swift
+@MainActor
+public protocol SampleViewFactory: Sendable {
+    func makeSampleView() -> AnyView
+}
 ```
-Projects/<Layer>/<Module>/
-├── Package.swift
-├── Interface/     Public protocols and entities. Depends on no other internal module
-├── Sources/       Implementation
-├── Testing/       Public mocks that other modules import
-├── Tests/         swift-testing
-└── Example/       Feature layer only — a standalone demo app
-    ├── project.yml    That app target's spec, with paths relative to itself
-    └── Sources/
-```
+
+When one screen has to push another, the app passes a closure into the factory. Features stay unaware of each other, so any one of them can be built and demoed alone.
+
+## How a module is composed
+
+A module is made of up to five build targets, each one a folder:
+
+| Folder | Target | Role |
+|---|---|---|
+| `Interface/` | library | Public protocols and entities. Depends on no other internal module |
+| `Sources/` | library | The implementation |
+| `Testing/` | library | Public mocks that other modules, demos, and previews import |
+| `Tests/` | test bundle | Unit tests |
+| `Example/` | app | A standalone demo of this module alone |
 
 **Targets may be omitted when a layer doesn't need them.** `Sources` and `Tests` are required; the rest are optional.
 
-- `FeatureExtraDesignSystem` has no `Interface` or `Testing` — there is no contract to abstract.
-- `AppDIContainer` has no `Testing` — it exists only to assemble the app.
+- `FeatureExtraDesignSystem` has no `Interface` or `Testing` — a resource module has no contract to abstract
+- `AppDIContainer` has no `Testing` — it exists only to assemble the app
+- `Example` is for the Feature layer only; other layers are verified through their tests
+
+Splitting `Interface` from `Sources` is what makes rule 2 enforceable: a module that depends on an interface cannot reach the implementation behind it, so changing an implementation never ripples upward.
 
 ### Mock conventions
 
@@ -85,51 +95,16 @@ public actor MockSampleRepository: SampleRepository {
 }
 ```
 
-## Resources
+Because `Testing` is a real target rather than test-only code, an Example app can inject the same mocks a unit test uses and run the module without the rest of the app.
 
-Modules that ship resources put them in `Sources/Resources/` and declare them in `Package.swift`.
+### Errors
 
-```swift
-.target(name: "FeatureExtraDesignSystem", path: "Sources", resources: [.process("Resources")])
-```
+Each layer defines its own error type and translates at the boundary. An `Infra` failure becomes a `Domain` error before it crosses into `Domain`, so callers never have to know what lives two layers down.
 
-SwiftPM generates the resource bundle and the `Bundle.module` accessor. Assets and string catalogs are both read with `bundle: .module`.
+### Resources
 
-> Argument order in `.target(...)` is `name → dependencies → path → exclude → sources → resources`. Putting `resources:` before `path:` is a compile error.
+Modules that ship assets or string catalogs keep them under `Sources/Resources/`, and read them from the module's own bundle rather than the app bundle.
 
-## Testing
+---
 
-`make check <Module>` picks one of two paths automatically.
-
-- If `platforms` in `Package.swift` includes `.macOS` → `swift test` (**no simulator, considerably faster**)
-- Otherwise → `xcodebuild test` against an iOS simulator
-
-Enabling macOS is **opt-in per module**. Modules that avoid UI frameworks — Domain, Infra, Shared — can turn it on, but if an iOS-only third-party dependency lands, just switch that one module back off.
-
-## Adding an app target (AppWatch, AppNotificationHandler, …)
-
-**App targets carry their own settings in their own folder.** `Projects/App/AppMobile/project.yml` is the example; paths inside it are relative to that file (`Sources`, `Tests`).
-
-1. Declare the target in `Projects/App/<AppName>/project.yml`
-   - watchOS app: `type: application.watchapp2`, `platform: watchOS`
-   - Extension: `type: app-extension` — the host app pulls it in with `embed: true`. Embedding within the App layer is the exception to the "no same-layer dependencies" rule.
-2. Add one line to `include:` in the root `project.yml`
-3. Add the target platform to `platforms` in **every module** that target uses
-   ```bash
-   make module NAME=FeatureGlance LAYER=Feature PLATFORMS=iOS,watchOS
-   ```
-
-Example apps follow the same convention: each one keeps its spec in `Example/project.yml`, listed under `include:` in the root spec. A demo that needs camera usage descriptions or an extra mock package declares that in its own file.
-
-## Adding a module
-
-```bash
-make module NAME=FeatureHome LAYER=Feature
-```
-
-Two things are left to do afterwards.
-
-1. Add lower-layer modules to `dependencies` in `Package.swift` (the path depth is always `../../<Layer>/<Module>`)
-2. If the app uses it, add it to `Projects/App/AppDIContainer/Package.swift` and wire it up
-
-`make module` registers the package and the Example include in the root `project.yml` for you, so the only reason to edit that file by hand is adding an app target.
+This document describes the architecture. For how it is actually built — which parts are Swift Packages, which are Xcode targets, and where each thing is declared — see the **build-system-split** skill.

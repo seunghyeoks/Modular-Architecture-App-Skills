@@ -1,7 +1,10 @@
 # Swift Modular Architecture Skills
 
-Rules for an iOS modular architecture built from SPM modules and an XcodeGen app shell.
+Layer rules and module composition for an iOS modular architecture.
 Written as a skill: documentation for people, and a reference coding agents consult.
+
+This describes the architecture only. How a given project builds it — which parts are Swift
+Packages, which are Xcode targets — belongs to that project, not here.
 
 Attach it to a project as a git submodule.
 
@@ -14,8 +17,8 @@ Several projects share the same rules this way, and when a rule changes it chang
 
 ## Contents
 
-- [SKILL.md](SKILL.md) — layer definitions and the dependency matrix, module target layout,
-  resource placement, host test branching, and how to add an app target
+- [SKILL.md](SKILL.md) — layer definitions, the dependency matrix, how a module is composed,
+  mock conventions, and error translation across layers
 
 ## Single source of truth
 
