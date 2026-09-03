@@ -1,15 +1,17 @@
-# Swift Modular Architecture Skills
+# Modular Architecture App Skills
 
-Layer rules and module composition for an iOS modular architecture.
+Layer rules and module composition for a modular app architecture.
 Written as a skill: documentation for people, and a reference coding agents consult.
 
-This describes the architecture only. How a given project builds it — which parts are Swift
-Packages, which are Xcode targets — belongs to that project, not here.
+This describes the architecture only. How a given project builds it — which parts are
+packages, which are IDE targets — belongs to that project, not here.
+
+Examples are written in Swift; the rules themselves are language-agnostic.
 
 Attach it to a project as a git submodule.
 
 ```bash
-git submodule add git@github.com:seunghyeoks/Swift-Modular-Architecture-Skills.git \
+git submodule add git@github.com:seunghyeoks/Modular-Architecture-App-Skills.git \
   .agents/skills/modular-architecture
 ```
 

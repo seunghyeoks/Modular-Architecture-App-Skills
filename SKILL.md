@@ -5,6 +5,9 @@ description: Layer definitions, the dependency matrix, and how a module is compo
 
 # Modular Architecture
 
+Examples here are Swift, but the layering and dependency rules are language-agnostic —
+the same structure holds for a Kotlin or TypeScript app.
+
 ## At a glance
 
 ```
@@ -100,7 +103,7 @@ Further rules:
 2. **A module depends only on the Interface of the layers below it.** The single exception is `AppDIContainer` — a composition root has to see concrete types in order to assemble them.
 3. **Interface targets may depend only on external packages and Shared Interfaces.** That narrow allowance exists so shared error and ID types don't have to be redefined per module. (The App layer is exempt: `AppDIContainerInterface` needs Feature Interfaces to expose view factory contracts.)
 4. **Testing products are for test targets and Example apps only.**
-5. **Domain, Infra, and Shared must not import SwiftUI or UIKit.**
+5. **Domain, Infra, and Shared must not import UI frameworks** (SwiftUI, UIKit, Compose, and so on).
 
 ### Why features never depend on each other
 
@@ -158,4 +161,4 @@ Modules that ship assets or string catalogs keep them under `Sources/Resources/`
 
 ---
 
-This document describes the architecture. For how it is actually built — which parts are Swift Packages, which are Xcode targets, and where each thing is declared — see the **build-system-split** skill.
+This document describes the architecture. How a given project builds it — which parts are packages, which are IDE targets, and where each thing is declared — belongs to that project. In this repository that is the **build-system-split** skill.
