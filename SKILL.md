@@ -30,6 +30,57 @@ every layer ──→ Shared   (type extensions and utilities, Foundation only)
 | **Infra** | Infrastructure: networking, databases, keychain | **forbidden** |
 | **Shared** | Type extensions and utilities | **forbidden** |
 
+Each layer below says what it holds, what it keeps out, and the call that most often gets argued about.
+
+### App
+
+**Holds** the app lifecycle, deep link routing, the wiring between features (passing one feature's view factory into another as a closure), and `AppDIContainer`.
+
+**Keeps out** screens and business logic. The app owns *which* screen appears, never *what* it shows.
+
+**When it's unclear —** global state such as the signed-in session belongs to a `Domain` repository, not the app. The app may read it to decide the root screen, but it does not own it. Otherwise every layer ends up reaching back up for state.
+
+### Feature
+
+**Holds** views, view models, display models (a formatted date, a localized label), and screen state: loading, error, selection, scroll position.
+
+**Keeps out** other features, network calls, persistence, and domain rules. A feature talks to `Domain` interfaces and nothing else.
+
+**When it's unclear —** pagination splits. The screen owns "the user reached the bottom, load more"; the repository owns the cursor and what page comes next. If the view model is tracking offsets, that logic belongs one layer down.
+
+### FeatureExtra
+
+**Holds** design tokens (colour, type, spacing), reusable components, icons, and string catalogs.
+
+**Keeps out** anything that knows a domain concept, and anything only one feature uses — that lives with its feature.
+
+**When it's unclear —** a component wants to take a domain entity, say `UserCard(user:)`. Don't. It takes primitives: `UserCard(name:avatarURL:)`. The moment a component knows `User`, the design system depends on `Domain` and stops being reusable across projects.
+
+### Domain
+
+**Holds** entities, repository protocols and their implementations, DTO-to-entity mapping, domain rules and validation, and domain error types.
+
+**Keeps out** UI formatting (a date *string* belongs to the feature showing it) and transport details such as status codes or SQL.
+
+**When it's unclear —** there are no use case types here by default; a repository absorbs that role. Introduce one only when a single operation genuinely composes several repositories. A `UseCase` that forwards one call to one repository is indirection with no reader.
+
+### Infra
+
+**Holds** HTTP clients, database and keychain access, file IO, and DTOs — the shapes data arrives in. Retry, timeout, and caching policy live here too.
+
+**Keeps out** entities and domain rules. `Infra` does not know `Domain` exists, which is why `Domain` owns the mapping between them.
+
+**When it's unclear —** permission prompts (camera, location, notifications) need UI frameworks, so they cannot live here. Put them in a dedicated module the feature layer can reach, and let `Infra` assume access was already granted.
+
+### Shared
+
+**Holds** extensions on standard types, pure utilities, and contracts every layer needs — logging is the usual one.
+
+**Keeps out** domain concepts, and anything only one module uses.
+
+**When it's unclear —** ask whether two or more layers genuinely use it. If not, put it where it is used. `Shared` is the layer that quietly turns into a junk drawer, and because everything depends on it, everything rebuilds when it changes.
+
+
 ## Dependency rules
 
 Allowed directions (row → column). The single source of truth for this table is the `ALLOWED` dictionary at the top of `Scripts/lint-deps.py`, and `make lint-deps` enforces it.
