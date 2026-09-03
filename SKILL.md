@@ -1,42 +1,42 @@
 ---
 name: modular-architecture
-description: 이 저장소의 레이어 구조와 의존 규칙. 모듈을 추가하거나 의존성을 바꾸거나 앱 타겟(AppWatch, 익스텐션)을 늘릴 때, 그리고 레이어 위반을 진단할 때 참고한다. SPM 모듈 + XcodeGen 앱 셸 구성, TMA 5타겟, 리소스 배치, 호스트 테스트 분기를 다룬다.
+description: Layer structure and dependency rules for this repository. Consult when adding a module, changing dependencies, adding an app target (AppWatch, extensions), or diagnosing a layer violation. Covers the SPM-modules + XcodeGen-app-shell setup, the five module targets, resource placement, and host test branching.
 ---
 
-# 모듈러 아키텍처
+# Modular Architecture
 
-## 한눈에
+## At a glance
 
 ```
 App (AppMobile, AppWatch, AppNotificationHandler …)     ← .xcodeproj (XcodeGen)
  │
- ├─→ Feature ──→ Domain ──→ Infra                       ← 이하 전부 로컬 Swift Package
+ ├─→ Feature ──→ Domain ──→ Infra                       ← everything below is a local Swift Package
  │      ↘
- │      FeatureExtra   (Localization, Assets, DesignSystem)
+ │      FeatureExtra   (localization, assets, design system)
  │
- └─→ AppDIContainer (Composition Root)
+ └─→ AppDIContainer (composition root)
 
-모든 레이어 ──→ Shared   (타입 오버라이드·확장·유틸, Foundation only)
+every layer ──→ Shared   (type extensions and utilities, Foundation only)
 ```
 
-**모듈 하나 = 로컬 Swift Package 하나.** 실행 가능한 앱 타겟(App, Example)만 XcodeGen 이 만드는 `.xcodeproj` 에 있다. SwiftPM 이 iOS 앱 타겟을 만들 수 없기 때문에 생긴 분담이다.
+**One module is one local Swift Package.** Only runnable app targets — the app itself and per-module Example apps — live in the XcodeGen-generated `.xcodeproj`. That split exists because SwiftPM cannot produce an iOS app target.
 
-이 구조의 목적은 **일상 작업에서 프로젝트 재생성을 없애는 것**이다. 파일 추가, 모듈 수정, 의존성 변경이 모두 SwiftPM 영역에서 끝나므로 Xcode 재인덱싱이 일어나지 않는다.
+The point of this structure is to **eliminate project regeneration from everyday work**. Adding files, editing modules, and changing dependencies all stay inside SwiftPM, so Xcode never has to reindex.
 
-## 레이어
+## Layers
 
-| 레이어 | 역할 | UI 프레임워크 |
+| Layer | Responsibility | UI frameworks |
 |---|---|---|
-| **App** | 실행 타겟과 Composition Root. 앱 조립은 `AppDIContainer` 한 곳에서만 | 허용 |
-| **Feature** | 화면 단위. View + ViewModel + ViewFactory | 허용 |
-| **FeatureExtra** | Feature 가 쓰는 UI 공용 자원 — 로컬라이제이션, 에셋, 디자인 시스템 | 허용 |
-| **Domain** | Entity + Repository 프로토콜 + 구현 | **금지** |
-| **Infra** | 네트워크·DB·Keychain 등 인프라 | **금지** |
-| **Shared** | 타입 오버라이드, Swift 확장, 공용 유틸 | **금지** |
+| **App** | Runnable targets and the composition root. Assembly happens only in `AppDIContainer` | allowed |
+| **Feature** | One screen. View + ViewModel + ViewFactory | allowed |
+| **FeatureExtra** | Shared UI resources for features — localization, assets, design system | allowed |
+| **Domain** | Entities, repository protocols, and their implementations | **forbidden** |
+| **Infra** | Infrastructure: networking, databases, keychain | **forbidden** |
+| **Shared** | Type extensions and utilities | **forbidden** |
 
-## 의존 규칙
+## Dependency rules
 
-허용 행렬 (행 → 열). 이 표의 단일 출처는 `Scripts/lint-deps.py` 상단의 `ALLOWED` 이며, `make lint-deps` 가 검사한다.
+Allowed directions (row → column). The single source of truth for this table is the `ALLOWED` dictionary at the top of `Scripts/lint-deps.py`, and `make lint-deps` enforces it.
 
 | from \ to | App | Feature | FeatureExtra | Domain | Infra | Shared |
 |---|---|---|---|---|---|---|
@@ -47,34 +47,34 @@ App (AppMobile, AppWatch, AppNotificationHandler …)     ← .xcodeproj (XcodeG
 | **Infra** | ✗ | ✗ | ✗ | ✗ | ✗ | ✅ |
 | **Shared** | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
 
-추가 규칙:
+Further rules:
 
-1. **같은 레이어끼리 의존 금지.** Feature 간 화면 전환은 App 이 closure 를 ViewFactory 에 주입해 잇는다
-2. **상위는 하위의 Interface product 만 의존한다.** 유일한 예외가 `AppDIContainer` — Composition Root 는 구현체를 알아야 조립할 수 있다
-3. **Interface 타겟은 외부 SPM 과 Shared 레이어 Interface 만** 의존할 수 있다. 공용 에러·ID 타입을 쓰기 위한 최소 허용이다. (App 레이어는 예외 — `AppDIContainerInterface` 가 ViewFactory 계약을 노출하려면 Feature Interface 가 필요하다)
-4. **Testing product 는 테스트 타겟과 Example 앱에서만** 쓴다
-5. **Domain / Infra / Shared 는 SwiftUI·UIKit 을 import 하지 않는다**
+1. **Modules in the same layer must not depend on each other.** Navigation between features is wired by the app, which injects closures into view factories.
+2. **A module depends only on the Interface products of the layers below it.** The single exception is `AppDIContainer` — a composition root has to see concrete types in order to assemble them.
+3. **Interface targets may depend only on external SPM packages and Shared Interface products.** That narrow allowance exists so shared error and ID types don't have to be redefined per module. (The App layer is exempt: `AppDIContainerInterface` needs Feature Interfaces to expose view factory contracts.)
+4. **Testing products are for test targets and Example apps only.**
+5. **Domain, Infra, and Shared must not import SwiftUI or UIKit.**
 
-## 모듈 구성
+## Module layout
 
 ```
 Projects/<Layer>/<Module>/
 ├── Package.swift
-├── Interface/     public 프로토콜과 Entity. 다른 내부 모듈에 의존하지 않는다
-├── Sources/       구현
-├── Testing/       다른 모듈이 import 하는 public Mock
+├── Interface/     Public protocols and entities. Depends on no other internal module
+├── Sources/       Implementation
+├── Testing/       Public mocks that other modules import
 ├── Tests/         swift-testing
-└── Example/       Feature 레이어만. 앱 프로젝트가 앱 타겟으로 가져간다
+└── Example/       Feature layer only. The app project picks this up as an app target
 ```
 
-**타겟은 레이어 성격에 따라 생략할 수 있다.** `Sources` 와 `Tests` 는 필수이고 나머지는 필요할 때만 둔다.
+**Targets may be omitted when a layer doesn't need them.** `Sources` and `Tests` are required; the rest are optional.
 
-- `FeatureExtraDesignSystem` 은 추상화할 계약이 없어 `Interface` / `Testing` 이 없다
-- `AppDIContainer` 는 조립 전용이라 `Testing` 이 없다
+- `FeatureExtraDesignSystem` has no `Interface` or `Testing` — there is no contract to abstract.
+- `AppDIContainer` has no `Testing` — it exists only to assemble the app.
 
-### Mock 관례
+### Mock conventions
 
-`Testing/` 의 Mock 은 `actor` 로 상태를 보호하고 `stubbed*` 와 `*CallCount` 를 노출한다.
+Mocks in `Testing/` are actors that guard their state and expose `stubbed*` and `*CallCount`.
 
 ```swift
 public actor MockSampleRepository: SampleRepository {
@@ -83,51 +83,51 @@ public actor MockSampleRepository: SampleRepository {
 }
 ```
 
-## 리소스
+## Resources
 
-리소스를 가진 모듈은 `Sources/Resources/` 에 두고 `Package.swift` 에 선언한다.
+Modules that ship resources put them in `Sources/Resources/` and declare them in `Package.swift`.
 
 ```swift
 .target(name: "FeatureExtraDesignSystem", path: "Sources", resources: [.process("Resources")])
 ```
 
-SwiftPM 이 리소스 번들과 `Bundle.module` 접근자를 자동 생성한다. Assets, String Catalog 모두 `bundle: .module` 로 읽는다.
+SwiftPM generates the resource bundle and the `Bundle.module` accessor. Assets and string catalogs are both read with `bundle: .module`.
 
-> `.target(...)` 의 인자 순서는 `name → dependencies → path → exclude → sources → resources` 다. `resources:` 를 `path:` 앞에 두면 컴파일 에러가 난다.
+> Argument order in `.target(...)` is `name → dependencies → path → exclude → sources → resources`. Putting `resources:` before `path:` is a compile error.
 
-## 테스트
+## Testing
 
-`make check <Module>` 이 두 경로를 자동으로 갈라 쓴다.
+`make check <Module>` picks one of two paths automatically.
 
-- `Package.swift` 의 `platforms` 에 `.macOS` 가 있으면 → `swift test` (**시뮬레이터 불필요, 훨씬 빠름**)
-- 없으면 → `xcodebuild test` (iOS 시뮬레이터)
+- If `platforms` in `Package.swift` includes `.macOS` → `swift test` (**no simulator, considerably faster**)
+- Otherwise → `xcodebuild test` against an iOS simulator
 
-macOS 를 켜는 건 **모듈별 선택 사항**이다. UI 프레임워크를 쓰지 않는 Domain/Infra/Shared 는 켤 수 있지만, iOS 전용 서드파티가 붙으면 그 모듈만 도로 끄면 된다.
+Enabling macOS is **opt-in per module**. Modules that avoid UI frameworks — Domain, Infra, Shared — can turn it on, but if an iOS-only third-party dependency lands, just switch that one module back off.
 
-## 앱 타겟 추가 (AppWatch, AppNotificationHandler 등)
+## Adding an app target (AppWatch, AppNotificationHandler, …)
 
-**앱 타겟은 자기 폴더에서 설정을 들고 있다.** `Projects/App/AppMobile/project.yml` 이 그 예이며, 경로는 그 파일 기준 상대경로(`Sources`, `Tests`)로 쓴다.
+**App targets carry their own settings in their own folder.** `Projects/App/AppMobile/project.yml` is the example; paths inside it are relative to that file (`Sources`, `Tests`).
 
-1. `Projects/App/<앱이름>/project.yml` 에 타겟 선언
-   - watchOS 앱: `type: application.watchapp2`, `platform: watchOS`
-   - 익스텐션: `type: app-extension` — 앱 타겟이 `embed: true` 로 물린다. App 레이어 안에서의 embed 는 "같은 레이어 금지" 규칙의 예외다
-2. 루트 `project.yml` 의 `include:` 에 한 줄 추가
-3. 그 타겟이 쓰는 **모든 하위 모듈**의 `platforms` 에 대상 플랫폼 추가
+1. Declare the target in `Projects/App/<AppName>/project.yml`
+   - watchOS app: `type: application.watchapp2`, `platform: watchOS`
+   - Extension: `type: app-extension` — the host app pulls it in with `embed: true`. Embedding within the App layer is the exception to the "no same-layer dependencies" rule.
+2. Add one line to `include:` in the root `project.yml`
+3. Add the target platform to `platforms` in **every module** that target uses
    ```bash
    make module NAME=FeatureGlance LAYER=Feature PLATFORMS=iOS,watchOS
    ```
 
-Example 앱은 이와 달리 전부 같은 모양이라 `Scripts/gen-modules.sh` 가 자동 생성한다 — 별도 `project.yml` 을 두지 않는다.
+Example apps work differently: they are all shaped identically, so `Scripts/gen-modules.sh` generates them and they get no `project.yml` of their own.
 
-## 새 모듈 추가
+## Adding a module
 
 ```bash
 make module NAME=FeatureHome LAYER=Feature
 ```
 
-생성 후 할 일은 두 가지뿐이다.
+Two things are left to do afterwards.
 
-1. `Package.swift` 의 `dependencies` 에 하위 레이어 모듈 추가 (경로 깊이는 항상 `../../<Layer>/<Module>`)
-2. 앱에서 쓴다면 `Projects/App/AppDIContainer/Package.swift` 에 추가하고 조립
+1. Add lower-layer modules to `dependencies` in `Package.swift` (the path depth is always `../../<Layer>/<Module>`)
+2. If the app uses it, add it to `Projects/App/AppDIContainer/Package.swift` and wire it up
 
-`packages:` 등록과 Example 앱 타겟은 `Scripts/gen-modules.sh` 가 자동 생성하므로 `project.yml` 은 손대지 않는다. 루트 `project.yml` 을 건드리는 경우는 **앱 타겟을 추가할 때뿐**이다.
+`packages:` registration and Example app targets are generated by `Scripts/gen-modules.sh`, so `project.yml` stays untouched. The only reason to edit the root `project.yml` is adding an app target.
